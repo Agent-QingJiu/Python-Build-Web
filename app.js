@@ -1,5 +1,6 @@
 const OWNER='Agent-QingJiu',REPO='Python-Build-Core',e=id=>document.getElementById(id);let job=null,timer=null;
 const show=s=>e('status').textContent=s;
+function progress(n,label){n=Math.max(0,Math.min(100,n));e('fill').style.width=n+'%';e('progress').setAttribute('aria-valuenow',String(n));e('phase').textContent=label;e('percent').textContent=n+'% · 阶段进度（非 PyInstaller 实时百分比）'}
 e('kind').onchange=()=>{e('source').accept='.'+e('kind').value;e('source').value=''};
 async function api(path,method='GET',body){
  const token=e('token').value.trim();if(!token)throw Error('请先填写 GitHub Token');
@@ -26,23 +27,26 @@ async function build(){
   if(mode==='onefile'&&estimated>512*1024**2&&!confirm('源文件已经超过 512MB，建议使用目录模式。仍然继续吗？'))return;
   const id='job-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),prefix='jobs/'+id;
   const config={type:kind,name,entry:e('entry').value.trim(),mode,windowed:e('windowed').checked,auto_deps:e('auto').checked,packages:e('packages').value,hidden_imports:e('hidden').value.split(/[\s,;]+/).filter(Boolean)};
-  show('验证 Token 对私有仓库的访问权限……');
+  progress(5,'检查授权');show('验证 Token 对私有仓库的访问权限……');
   await api('/repos/'+OWNER+'/'+REPO);
-  show('上传源码：'+bytes(file.size)+'\n任务：'+id);
+  progress(10,'上传源码');show('上传源码：'+bytes(file.size)+'\n任务：'+id);
   await upload(prefix+'/input.'+kind,file);
-  if(icon){show('上传 ICO 图标');await upload(prefix+'/icon.ico',icon)}
-  await upload(prefix+'/config.json',new Blob([JSON.stringify(config)]));
+  progress(20,'源码上传完成');if(icon){show('上传 ICO 图标');await upload(prefix+'/icon.ico',icon)}
+  await upload(prefix+'/config.json',new Blob([JSON.stringify(config)]));progress(30,'准备构建');
   show('提交 GitHub Actions 构建任务');
   await api('/repos/'+OWNER+'/'+REPO+'/actions/workflows/build.yml/dispatches','POST',{ref:'main',inputs:{job_id:id,python_version:e('python').value}});
-  job=id;show('任务已提交：'+id+'\n正在等待 GitHub Runner 分配……');
+  job=id;progress(35,'等待 Windows Runner');show('任务已提交：'+id+'\n正在等待 GitHub Runner 分配……');
   await refresh();timer=setInterval(()=>{refresh().catch(err=>show('状态刷新失败：'+err.message))},12000);
- }catch(err){show('失败：'+err.message)}finally{e('build').disabled=false}
+ }catch(err){progress(0,'提交失败');show('失败：'+err.message)}finally{e('build').disabled=false}
 }
 async function refresh(){
  if(!job)throw Error('还没有提交构建任务');
  const r=await api('/repos/'+OWNER+'/'+REPO+'/actions/workflows/build.yml/runs?per_page=100');
  const item=r.workflow_runs.find(x=>x.display_title&&x.display_title.includes(job));
- if(!item){show('任务 '+job+' 已提交，等待 Actions 列表同步……');return}
+ if(!item){progress(35,'等待任务同步');show('任务 '+job+' 已提交，等待 Actions 列表同步……');return}
+ if(item.status==='queued'||item.status==='waiting'||item.status==='pending')progress(40,'排队等待 Runner');
+ else if(item.status==='in_progress')progress(65,'Windows 构建中');
+ else if(item.status==='completed')progress(item.conclusion==='success'?100:85,item.conclusion==='success'?'构建成功 · 源码清理已尝试执行':'构建结束 · 检查日志');
  show('任务：'+job+'\n状态：'+item.status+'\n结果：'+(item.conclusion||'执行中')+'\n更新：'+item.updated_at);
  const links=e('links');links.replaceChildren();
  const a=document.createElement('a');a.href=item.html_url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='查看 GitHub Actions 构建日志';links.append(a);
