@@ -1,5 +1,18 @@
 const OWNER='Agent-QingJiu',REPO='Python-Build-Core',e=id=>document.getElementById(id);let job=null,timer=null,activeRun=null,uploadStarted=0;
 const show=s=>e('status').textContent=s;
+function extraResources(){
+ const files=[...e('extraFiles').files].map(file=>({file,path:file.name}));
+ const folders=[...e('extraFolder').files].map(file=>({file,path:file.webkitRelativePath||file.name}));
+ const target=e('extraTarget').value.trim().replaceAll('\\','/')||'.';
+ if(target.startsWith('/')||target.split('/').some(x=>x==='..'||x==='')||target.includes(':'))throw Error('附加资源内部位置不合法');
+ const result=[...files,...folders].map(x=>({...x,path:(target==='.'?'':target+'/')+x.path.replaceAll('\\','/')}));
+ if(result.length>100)throw Error('附加资源最多 100 个文件，请改用 ZIP 项目');
+ if(result.some(x=>x.path.split('/').some(t=>t==='..'||t==='')||x.path.includes(':')))throw Error('附加资源包含非法路径');
+ if(new Set(result.map(x=>x.path.toLowerCase())).size!==result.length)throw Error('附加资源存在同名冲突，请调整位置');
+ return result;
+}
+function renderExtras(){try{const list=extraResources();e('extraList').textContent=list.length?list.map(x=>x.path+' · '+bytes(x.file.size)).join('\n'):'尚未选择附加资源'}catch(err){e('extraList').textContent=err.message}}
+['extraFiles','extraFolder','extraTarget'].forEach(id=>e(id).addEventListener('change',renderExtras));
 function progress(n,label){n=Math.max(0,Math.min(100,n));e('fill').style.width=n+'%';e('progress').setAttribute('aria-valuenow',String(n));e('phase').textContent=label;e('percent').textContent=n+'% · 阶段进度（非 PyInstaller 实时百分比）'}
 e('kind').onchange=()=>{e('source').accept='.'+e('kind').value;e('source').value=''};
 async function api(path,method='GET',body){
@@ -22,16 +35,19 @@ async function build(){
   const mode=e('mode').value;
   const icon=e('icon').files[0];
   if(icon&&(!icon.name.toLowerCase().endsWith('.ico')||icon.size>1024*1024))throw Error('ICO 图标需小于 1MB');
-  const estimated=file.size+(icon?.size||0);
+  const extras=extraResources();
+  const estimated=file.size+(icon?.size||0)+extras.reduce((sum,x)=>sum+x.file.size,0);
+  if(extras.some(x=>x.file.size>25*1024*1024))throw Error('单个附加资源超过 25MB，请将完整项目压缩为 ZIP');
   if(mode==='onefile'&&estimated>1024**3)throw Error('单文件预计超过 1024MB，禁止打包');
   if(mode==='onefile'&&estimated>512*1024**2&&!confirm('源文件已经超过 512MB，建议使用目录模式。仍然继续吗？'))return;
   const id='job-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),prefix='jobs/'+id;
-  const config={type:kind,name,entry:e('entry').value.trim(),mode,windowed:e('windowed').checked,auto_deps:e('auto').checked,packages:e('packages').value,hidden_imports:e('hidden').value.split(/[\s,;]+/).filter(Boolean),smoke_test:e('smoke').checked};
+  const config={type:kind,name,entry:e('entry').value.trim(),mode,windowed:e('windowed').checked,auto_deps:e('auto').checked,packages:e('packages').value,hidden_imports:e('hidden').value.split(/[\s,;]+/).filter(Boolean),smoke_test:e('smoke').checked,extra_resources:extras.map((x,i)=>({source:'extra/'+i,path:x.path}))};
   progress(5,'检查授权');show('验证 Token 对私有仓库的访问权限……');
   await api('/repos/'+OWNER+'/'+REPO);
   progress(10,'上传源码');show('上传源码：'+bytes(file.size)+'\n任务：'+id);
   await upload(prefix+'/input.'+kind,file);
   progress(20,'源码上传完成');if(icon){show('上传 ICO 图标');await upload(prefix+'/icon.ico',icon)}
+  for(let i=0;i<extras.length;i++){show('上传附加资源 '+(i+1)+'/'+extras.length+'：'+extras[i].path);await upload(prefix+'/extra/'+i,extras[i].file)}
   await upload(prefix+'/config.json',new Blob([JSON.stringify(config)]));progress(30,'准备构建');
   show('提交 GitHub Actions 构建任务');
   await api('/repos/'+OWNER+'/'+REPO+'/actions/workflows/build.yml/dispatches','POST',{ref:'main',inputs:{job_id:id,python_version:e('python').value}});
