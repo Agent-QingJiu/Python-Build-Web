@@ -66,10 +66,10 @@ async function refresh(){
  const a=document.createElement('a');a.href=item.html_url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='查看 GitHub Actions 构建日志';links.append(a);
  if(item.status==='completed'){
   clearInterval(timer);
-  if(item.conclusion==='success'){
+  {
    const artifacts=await api('/repos/'+OWNER+'/'+REPO+'/actions/runs/'+item.id+'/artifacts');
-   const artifact=artifacts.artifacts.find(x=>x.name==='EXE-'+job&&!x.expired);
-   if(artifact){const btn=document.createElement('button');btn.textContent='下载 EXE 构建产物 ZIP';btn.onclick=async()=>{try{const token=e('token').value.trim();const res=await fetch('https://api.github.com/repos/'+OWNER+'/'+REPO+'/actions/artifacts/'+artifact.id+'/zip',{headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json'}});if(!res.ok)throw Error('下载失败 '+res.status);const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=artifact.name+'.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000)}catch(err){show('下载失败：'+err.message+'\n可前往 Actions 页面手动下载')}};links.append(document.createTextNode(' '),btn)}
+   const artifact=artifacts.artifacts.find(x=>x.name===(item.conclusion==='success'?'EXE-':'Diagnostics-')+job&&!x.expired);
+   if(artifact){const btn=document.createElement('button');btn.textContent=item.conclusion==='success'?'下载 EXE 构建产物 ZIP':'下载失败诊断报告 ZIP';btn.onclick=async()=>{try{const token=e('token').value.trim();const res=await fetch('https://api.github.com/repos/'+OWNER+'/'+REPO+'/actions/artifacts/'+artifact.id+'/zip',{headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json'}});if(!res.ok)throw Error('下载失败 '+res.status);const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=artifact.name+'.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000)}catch(err){show('下载失败：'+err.message+'\n可前往 Actions 页面手动下载')}};links.append(document.createTextNode(' '),btn)}
   }
  }
 }
