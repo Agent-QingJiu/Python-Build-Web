@@ -76,3 +76,26 @@ async function refresh(){
 e('build').onclick=()=>build();
 e('refresh').onclick=()=>refresh().catch(err=>show('查询失败：'+err.message));
 e('source').addEventListener('change',async()=>{const f=e('source').files[0];if(!f)return;const name=f.name.replace(/\.(py|zip)$/i,'').replace(/[^a-zA-Z0-9_.-]/g,'_');if(name)e('name').value=name.slice(0,60);if(f.name.endsWith('.py')){const text=await f.text();const found=[...text.matchAll(/^(?:from|import)\s+([A-Za-z_][\w]*)/gm)].map(x=>x[1]);const known={PySide6:'PySide6',PyQt6:'PyQt6',PIL:'Pillow',cv2:'opencv-python',requests:'requests',numpy:'numpy',pandas:'pandas',yaml:'PyYAML',bs4:'beautifulsoup4',flask:'flask',fastapi:'fastapi',tkinter:null};const deps=[...new Set(found.filter(x=>known[x]).map(x=>known[x]))];if(deps.length&&!e('packages').value.trim())e('packages').value=deps.join('\n');if(found.includes('tkinter')||found.includes('PySide6')||found.includes('PyQt6'))e('windowed').checked=true;show('智能预检测：'+(deps.join(', ')||'未发现已知第三方依赖')+'\n请检查识别结果后再提交。')}});
+
+const TOKEN_KEY='python-build-center-token-v1';
+const tokenField=e('token'),remember=e('rememberToken'),tokenStatus=e('tokenStatus');
+function saveToken(){
+ try{
+  if(remember.checked){
+   if(tokenField.value.trim()){localStorage.setItem(TOKEN_KEY,tokenField.value.trim());tokenStatus.textContent='已保存在此浏览器';}
+   else{localStorage.removeItem(TOKEN_KEY);tokenStatus.textContent='未保存 Token';}
+  }else{localStorage.removeItem(TOKEN_KEY);tokenStatus.textContent='不会保存 Token';}
+ }catch(err){tokenStatus.textContent='浏览器禁止本地存储，请手动输入 Token';}
+}
+try{
+ const saved=localStorage.getItem(TOKEN_KEY);
+ if(saved){tokenField.value=saved;remember.checked=true;tokenStatus.textContent='已从此浏览器读取 Token';}
+ else tokenStatus.textContent='仅在你信任的私人电脑上启用记住功能';
+}catch(err){tokenStatus.textContent='当前浏览器不支持本地保存';}
+tokenField.addEventListener('change',saveToken);
+tokenField.addEventListener('blur',saveToken);
+remember.addEventListener('change',saveToken);
+e('clearToken').addEventListener('click',()=>{
+ try{localStorage.removeItem(TOKEN_KEY)}catch(err){}
+ tokenField.value='';remember.checked=false;tokenStatus.textContent='已清除当前浏览器保存的 Token';
+});
