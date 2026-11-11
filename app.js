@@ -1,1 +1,57 @@
-const O='Agent-QingJiu',R='Python-Build-Core',el=id=>document.getElementById(id);let current=null;el('kind').onchange=()=>{el('source').accept='.'+el('kind').value;el('source').value=''};function say(s){el('status').textContent=s}async function api(path,method='GET',body){let token=el('token').value.trim();if(!token)throw Error('请输入有私有仓库 Contents 和 Actions 权限的 GitHub Token');let r=await fetch('https://api.github.com'+path,{method,headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'},body:body?JSON.stringify(body):undefined});if(!r.ok)throw Error('GitHub '+r.status+': '+(await r.text()).slice(0,250));return r.status===204?null:r.json()}function base64(a){let s='';for(let i=0;i<a.length;i+=8192)s+=String.fromCharCode(...a.subarray(i,i+8192));return btoa(s)}async function put(path,blob){let a=new Uint8Array(await blob.arrayBuffer());return api('/repos/'+O+'/'+R+'/contents/'+path,'PUT',{message:'Build job '+path,content:base64(a),branch:'main'})}el('build').onclick=async()=>{el('build').disabled=true;try{let f=el('source').files[0],kind=el('kind').value;if(!f||!f.name.toLowerCase().endsWith('.'+kind))throw Error('请选择正确的源码文件');if(f.size>25*1024*1024)throw Error('单文件最大 25MB');let id='job-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),prefix='jobs/'+id;let config={type:kind,name:el('name').value,entry:el('entry').value,mode:el('mode').value,windowed:el('windowed').checked,packages:el('packages').value};say('上传源码中');await put(prefix+'/input.'+kind,f);let icon=el('icon').files[0];if(icon){if(!icon.name.toLowerCase().endsWith('.ico'))throw Error('图标必须是 ICO');await put(prefix+'/icon.ico',icon)}await put(prefix+'/config.json',new Blob([JSON.stringify(config)]));say('触发云端构建');await api('/repos/'+O+'/'+R+'/actions/workflows/build.yml/dispatches','POST',{ref:'main',inputs:{job_id:id,python_version:el('python').value}});current=id;say('任务已提交：'+id+'。请稍后查询状态。');el('links').innerHTML='<a target="_blank" href="https://github.com/'+O+'/'+R+'/actions">打开 Actions</a>'}catch(e){say('失败：'+e.message)}finally{el('build').disabled=false}};el('refresh').onclick=async()=>{try{if(!current)throw Error('请先提交任务');let a=await api('/repos/'+O+'/'+R+'/actions/workflows/build.yml/runs?per_page=40');let r=a.workflow_runs.find(x=>x.display_title?.includes(current));if(!r){say('构建尚未出现在最近运行列表中');return}say('任务：'+current+'\n状态：'+r.status+'\n结果：'+(r.conclusion||'等待中'));el('links').innerHTML='<a target="_blank" href="'+r.html_url+'">查看日志和下载构建产物</a>'}catch(e){say('查询失败：'+e.message)}};
+const OWNER='Agent-QingJiu',REPO='Python-Build-Core',e=id=>document.getElementById(id);let job=null,timer=null;
+const show=s=>e('status').textContent=s;
+e('kind').onchange=()=>{e('source').accept='.'+e('kind').value;e('source').value=''};
+async function api(path,method='GET',body){
+ const token=e('token').value.trim();if(!token)throw Error('请先填写 GitHub Token');
+ const response=await fetch('https://api.github.com'+path,{method,headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
+ if(!response.ok)throw Error('GitHub API '+response.status+'：'+(await response.text()).slice(0,350));
+ return response.status===204?null:response.json();
+}
+function b64(bytes){let s='';for(let i=0;i<bytes.length;i+=8192)s+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(s)}
+async function upload(path,file){const bytes=new Uint8Array(await file.arrayBuffer());await api('/repos/'+OWNER+'/'+REPO+'/contents/'+path,'PUT',{message:'Build upload '+path,content:b64(bytes),branch:'main'})}
+function bytes(n){return (n/1024/1024).toFixed(1)+' MB'}
+async function build(){
+ e('build').disabled=true;clearInterval(timer);
+ try{
+  const file=e('source').files[0],kind=e('kind').value;
+  if(!file||!file.name.toLowerCase().endsWith('.'+kind))throw Error('请选择有效的 .'+kind+' 文件');
+  if(file.size>25*1024*1024)throw Error('源码文件不能超过 25MB');
+  const name=e('name').value.trim();
+  if(!/^[A-Za-z0-9_.-]{1,60}$/.test(name))throw Error('软件名称只允许英文字母、数字、下划线、点和短横线');
+  const mode=e('mode').value;
+  const icon=e('icon').files[0];
+  if(icon&&(!icon.name.toLowerCase().endsWith('.ico')||icon.size>1024*1024))throw Error('ICO 图标需小于 1MB');
+  const estimated=file.size+(icon?.size||0);
+  if(mode==='onefile'&&estimated>1024**3)throw Error('单文件预计超过 1024MB，禁止打包');
+  if(mode==='onefile'&&estimated>512*1024**2&&!confirm('源文件已经超过 512MB，建议使用目录模式。仍然继续吗？'))return;
+  const id='job-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),prefix='jobs/'+id;
+  const config={type:kind,name,entry:e('entry').value.trim(),mode,windowed:e('windowed').checked,auto_deps:e('auto').checked,packages:e('packages').value,hidden_imports:e('hidden').value.split(/[\s,;]+/).filter(Boolean)};
+  show('上传源码：'+bytes(file.size)+'\n任务：'+id);
+  await upload(prefix+'/input.'+kind,file);
+  if(icon){show('上传 ICO 图标');await upload(prefix+'/icon.ico',icon)}
+  await upload(prefix+'/config.json',new Blob([JSON.stringify(config)]));
+  show('提交 GitHub Actions 构建任务');
+  await api('/repos/'+OWNER+'/'+REPO+'/actions/workflows/build.yml/dispatches','POST',{ref:'main',inputs:{job_id:id,python_version:e('python').value}});
+  job=id;show('任务已提交：'+id+'\n正在等待 GitHub Runner 分配……');
+  await refresh();timer=setInterval(()=>{refresh().catch(err=>show('状态刷新失败：'+err.message))},12000);
+ }catch(err){show('失败：'+err.message)}finally{e('build').disabled=false}
+}
+async function refresh(){
+ if(!job)throw Error('还没有提交构建任务');
+ const r=await api('/repos/'+OWNER+'/'+REPO+'/actions/workflows/build.yml/runs?per_page=100');
+ const item=r.workflow_runs.find(x=>x.display_title&&x.display_title.includes(job));
+ if(!item){show('任务 '+job+' 已提交，等待 Actions 列表同步……');return}
+ show('任务：'+job+'\n状态：'+item.status+'\n结果：'+(item.conclusion||'执行中')+'\n更新：'+item.updated_at);
+ const links=e('links');links.replaceChildren();
+ const a=document.createElement('a');a.href=item.html_url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='查看 GitHub Actions 构建日志';links.append(a);
+ if(item.status==='completed'){
+  clearInterval(timer);
+  if(item.conclusion==='success'){
+   const artifacts=await api('/repos/'+OWNER+'/'+REPO+'/actions/runs/'+item.id+'/artifacts');
+   const artifact=artifacts.artifacts.find(x=>x.name==='EXE-'+job&&!x.expired);
+   if(artifact){const btn=document.createElement('button');btn.textContent='下载 EXE 构建产物 ZIP';btn.onclick=async()=>{try{const token=e('token').value.trim();const res=await fetch('https://api.github.com/repos/'+OWNER+'/'+REPO+'/actions/artifacts/'+artifact.id+'/zip',{headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json'}});if(!res.ok)throw Error('下载失败 '+res.status);const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=artifact.name+'.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000)}catch(err){show('下载失败：'+err.message+'\n可前往 Actions 页面手动下载')}};links.append(document.createTextNode(' '),btn)}
+  }
+ }
+}
+e('build').onclick=()=>build();
+e('refresh').onclick=()=>refresh().catch(err=>show('查询失败：'+err.message));
