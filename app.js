@@ -26,7 +26,7 @@ async function build(){
   if(mode==='onefile'&&estimated>1024**3)throw Error('单文件预计超过 1024MB，禁止打包');
   if(mode==='onefile'&&estimated>512*1024**2&&!confirm('源文件已经超过 512MB，建议使用目录模式。仍然继续吗？'))return;
   const id='job-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),prefix='jobs/'+id;
-  const config={type:kind,name,entry:e('entry').value.trim(),mode,windowed:e('windowed').checked,auto_deps:e('auto').checked,packages:e('packages').value,hidden_imports:e('hidden').value.split(/[\s,;]+/).filter(Boolean)};
+  const config={type:kind,name,entry:e('entry').value.trim(),mode,windowed:e('windowed').checked,auto_deps:e('auto').checked,packages:e('packages').value,hidden_imports:e('hidden').value.split(/[\s,;]+/).filter(Boolean),smoke_test:e('smoke').checked};
   progress(5,'检查授权');show('验证 Token 对私有仓库的访问权限……');
   await api('/repos/'+OWNER+'/'+REPO);
   progress(10,'上传源码');show('上传源码：'+bytes(file.size)+'\n任务：'+id);
