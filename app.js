@@ -59,7 +59,7 @@ async function refresh(){
        progress(value,label);stepText='当前步骤：'+label;
      }else progress(44,'Runner 启动中');
    }catch(err){progress(60,'构建中（步骤暂不可用）');stepText='步骤读取暂不可用：'+err.message}
-   show('任务：'+job+'\\n状态：'+item.status+'\\n'+stepText+'\\n更新时间：'+item.updated_at);
+   show('任务：'+job+'\n状态：'+item.status+'\n'+stepText+'\n更新时间：'+item.updated_at);
  } else if(item.status==='completed')progress(item.conclusion==='success'?100:100,item.conclusion==='success'?'构建成功':'构建结束：'+item.conclusion);
  if(item.status!=='in_progress')show('任务：'+job+'\n状态：'+item.status+'\n结果：'+(item.conclusion||'执行中')+'\n更新：'+item.updated_at);
  const links=e('links');links.replaceChildren();
