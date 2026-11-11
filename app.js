@@ -4,7 +4,7 @@ e('kind').onchange=()=>{e('source').accept='.'+e('kind').value;e('source').value
 async function api(path,method='GET',body){
  const token=e('token').value.trim();if(!token)throw Error('请先填写 GitHub Token');
  const response=await fetch('https://api.github.com'+path,{method,headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});
- if(!response.ok)throw Error('GitHub API '+response.status+'：'+(await response.text()).slice(0,350));
+ if(!response.ok){const detail=(await response.text()).slice(0,350);if(response.status===404&&path.includes('/contents/'))throw Error('上传返回 404：Token 无法访问私有仓库 '+OWNER+'/'+REPO+'，请确认 Fine-grained Token 已选择该仓库且 Contents 为 Read and write。GitHub 原始响应：'+detail);throw Error('GitHub API '+response.status+'：'+detail)}
  return response.status===204?null:response.json();
 }
 function b64(bytes){let s='';for(let i=0;i<bytes.length;i+=8192)s+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(s)}
@@ -26,6 +26,8 @@ async function build(){
   if(mode==='onefile'&&estimated>512*1024**2&&!confirm('源文件已经超过 512MB，建议使用目录模式。仍然继续吗？'))return;
   const id='job-'+Date.now()+'-'+Math.random().toString(36).slice(2,8),prefix='jobs/'+id;
   const config={type:kind,name,entry:e('entry').value.trim(),mode,windowed:e('windowed').checked,auto_deps:e('auto').checked,packages:e('packages').value,hidden_imports:e('hidden').value.split(/[\s,;]+/).filter(Boolean)};
+  show('验证 Token 对私有仓库的访问权限……');
+  await api('/repos/'+OWNER+'/'+REPO);
   show('上传源码：'+bytes(file.size)+'\n任务：'+id);
   await upload(prefix+'/input.'+kind,file);
   if(icon){show('上传 ICO 图标');await upload(prefix+'/icon.ico',icon)}
