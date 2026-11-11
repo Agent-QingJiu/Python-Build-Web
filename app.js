@@ -31,7 +31,7 @@ async function build(){
   if(!file||!file.name.toLowerCase().endsWith('.'+kind))throw Error('请选择有效的 .'+kind+' 文件');
   if(file.size>25*1024*1024)throw Error('源码文件不能超过 25MB');
   const name=e('name').value.trim();
-  if(!/^[A-Za-z0-9_.-]{1,60}$/.test(name))throw Error('软件名称只允许英文字母、数字、下划线、点和短横线');
+  if(!name||name.length>100||/[<>:"/\\\\|?*\\x00-\\x1f]/.test(name)||/[. ]$/.test(name)||/^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\\.|$)/i.test(name))throw Error('软件名可使用中文，但不能包含 Windows 文件名禁用字符或保留名称');
   const mode=e('mode').value;
   const icon=e('icon').files[0];
   if(icon&&(!icon.name.toLowerCase().endsWith('.ico')||icon.size>1024*1024))throw Error('ICO 图标需小于 1MB');
@@ -102,13 +102,24 @@ async function refresh(){
   {
    const artifacts=await api('/repos/'+OWNER+'/'+REPO+'/actions/runs/'+item.id+'/artifacts');
    const artifact=artifacts.artifacts.find(x=>x.name===(item.conclusion==='success'?'EXE-':'Diagnostics-')+job&&!x.expired);
-   if(artifact){const btn=document.createElement('button');btn.textContent=item.conclusion==='success'?'下载 EXE 构建产物 ZIP':'下载失败诊断报告 ZIP';btn.onclick=async()=>{try{const token=e('token').value.trim();const res=await fetch('https://api.github.com/repos/'+OWNER+'/'+REPO+'/actions/artifacts/'+artifact.id+'/zip',{headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json'}});if(!res.ok)throw Error('下载失败 '+res.status);const blob=await res.blob();const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=artifact.name+'.zip';a.click();setTimeout(()=>URL.revokeObjectURL(url),30000)}catch(err){show('下载失败：'+err.message+'\n可前往 Actions 页面手动下载')}};links.append(document.createTextNode(' '),btn)}
+   if(artifact){const btn=document.createElement('button');btn.textContent=item.conclusion==='success'?'下载构建成品（单文件直接 EXE，目录模式 ZIP）':'下载失败诊断报告 ZIP';btn.onclick=async()=>{try{const token=e('token').value.trim();const res=await fetch('https://api.github.com/repos/'+OWNER+'/'+REPO+'/actions/artifacts/'+artifact.id+'/zip',{headers:{Authorization:'Bearer '+token,Accept:'application/vnd.github+json'}});if(!res.ok)throw Error('下载失败 '+res.status);const blob=await res.blob();let result=blob,filename=artifact.name+'.zip';
+if(item.conclusion==='success'){
+ if(typeof JSZip==='undefined')throw Error('ZIP 组件尚未加载，请刷新页面');
+ const zip=await JSZip.loadAsync(blob);
+ const files=Object.values(zip.files).filter(x=>!x.dir);
+ const exes=files.filter(x=>x.name.toLowerCase().endsWith('.exe'));
+ // A genuine onefile build has only the EXE plus optional JSON build report.
+ if(exes.length===1&&files.every(x=>x===exes[0]||x.name==='build-report.json')){
+   result=await exes[0].async('blob');filename=exes[0].name.split('/').pop();
+ }
+}
+const url=URL.createObjectURL(result);const a=document.createElement('a');a.href=url;a.download=filename;a.click();setTimeout(()=>URL.revokeObjectURL(url),30000)}catch(err){show('下载失败：'+err.message+'\n可前往 Actions 页面手动下载')}};links.append(document.createTextNode(' '),btn)}
   }
  }
 }
 e('build').onclick=()=>build();
 e('refresh').onclick=()=>refresh().catch(err=>show('查询失败：'+err.message));
-e('source').addEventListener('change',async()=>{const f=e('source').files[0];if(!f)return;const name=f.name.replace(/\.(py|zip)$/i,'').replace(/[^a-zA-Z0-9_.-]/g,'_');if(name)e('name').value=name.slice(0,60);if(f.name.endsWith('.py')){const text=await f.text();const found=[...text.matchAll(/^(?:from|import)\s+([A-Za-z_][\w]*)/gm)].map(x=>x[1]);const known={PySide6:'PySide6',PyQt6:'PyQt6',PIL:'Pillow',cv2:'opencv-python',requests:'requests',numpy:'numpy',pandas:'pandas',yaml:'PyYAML',bs4:'beautifulsoup4',flask:'flask',fastapi:'fastapi',tkinter:null};const deps=[...new Set(found.filter(x=>known[x]).map(x=>known[x]))];if(deps.length&&!e('packages').value.trim())e('packages').value=deps.join('\n');if(found.includes('tkinter')||found.includes('PySide6')||found.includes('PyQt6'))e('windowed').checked=true;show('智能预检测：'+(deps.join(', ')||'未发现已知第三方依赖')+'\n请检查识别结果后再提交。')}});
+e('source').addEventListener('change',async()=>{const f=e('source').files[0];if(!f)return;const name=f.name.replace(/\\.(py|zip)$/i,'').replace(/[<>:"/\\\\|?*\\x00-\\x1f]/g,'_').replace(/[. ]+$/,'');if(name)e('name').value=name.slice(0,100);if(f.name.endsWith('.py')){const text=await f.text();const found=[...text.matchAll(/^(?:from|import)\s+([A-Za-z_][\w]*)/gm)].map(x=>x[1]);const known={PySide6:'PySide6',PyQt6:'PyQt6',PIL:'Pillow',cv2:'opencv-python',requests:'requests',numpy:'numpy',pandas:'pandas',yaml:'PyYAML',bs4:'beautifulsoup4',flask:'flask',fastapi:'fastapi',tkinter:null};const deps=[...new Set(found.filter(x=>known[x]).map(x=>known[x]))];if(deps.length&&!e('packages').value.trim())e('packages').value=deps.join('\n');if(found.includes('tkinter')||found.includes('PySide6')||found.includes('PyQt6'))e('windowed').checked=true;show('智能预检测：'+(deps.join(', ')||'未发现已知第三方依赖')+'\n请检查识别结果后再提交。')}});
 
 const TOKEN_KEY='python-build-center-token-v1';
 const tokenField=e('token'),remember=e('rememberToken'),tokenStatus=e('tokenStatus');
