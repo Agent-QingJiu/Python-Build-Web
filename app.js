@@ -1,4 +1,4 @@
-const OWNER='Agent-QingJiu',REPO='Python-Build-Core',e=id=>document.getElementById(id);let job=null,timer=null;
+const OWNER='Agent-QingJiu',REPO='Python-Build-Core',e=id=>document.getElementById(id);let job=null,timer=null,activeRun=null,uploadStarted=0;
 const show=s=>e('status').textContent=s;
 function progress(n,label){n=Math.max(0,Math.min(100,n));e('fill').style.width=n+'%';e('progress').setAttribute('aria-valuenow',String(n));e('phase').textContent=label;e('percent').textContent=n+'% · 阶段进度（非 PyInstaller 实时百分比）'}
 e('kind').onchange=()=>{e('source').accept='.'+e('kind').value;e('source').value=''};
@@ -9,7 +9,7 @@ async function api(path,method='GET',body){
  return response.status===204?null:response.json();
 }
 function b64(bytes){let s='';for(let i=0;i<bytes.length;i+=8192)s+=String.fromCharCode(...bytes.subarray(i,i+8192));return btoa(s)}
-async function upload(path,file){const bytes=new Uint8Array(await file.arrayBuffer());await api('/repos/'+OWNER+'/'+REPO+'/contents/'+path,'PUT',{message:'Build upload '+path,content:b64(bytes),branch:'main'})}
+async function upload(path,file){const bytes=new Uint8Array(await file.arrayBuffer());progress(12,'读取文件 '+bytes.length+' 字节');await api('/repos/'+OWNER+'/'+REPO+'/contents/'+path,'PUT',{message:'Build upload '+path,content:b64(bytes),branch:'main'})}
 function bytes(n){return (n/1024/1024).toFixed(1)+' MB'}
 async function build(){
  e('build').disabled=true;clearInterval(timer);
@@ -36,7 +36,7 @@ async function build(){
   show('提交 GitHub Actions 构建任务');
   await api('/repos/'+OWNER+'/'+REPO+'/actions/workflows/build.yml/dispatches','POST',{ref:'main',inputs:{job_id:id,python_version:e('python').value}});
   job=id;progress(35,'等待 Windows Runner');show('任务已提交：'+id+'\n正在等待 GitHub Runner 分配……');
-  await refresh();timer=setInterval(()=>{refresh().catch(err=>show('状态刷新失败：'+err.message))},12000);
+  timer=setInterval(()=>{refresh().catch(err=>show('状态刷新失败：'+err.message))},5000);await refresh();
  }catch(err){progress(0,'提交失败');show('失败：'+err.message)}finally{e('build').disabled=false}
 }
 async function refresh(){
@@ -44,10 +44,24 @@ async function refresh(){
  const r=await api('/repos/'+OWNER+'/'+REPO+'/actions/workflows/build.yml/runs?per_page=100');
  const item=r.workflow_runs.find(x=>x.display_title&&x.display_title.includes(job));
  if(!item){progress(35,'等待任务同步');show('任务 '+job+' 已提交，等待 Actions 列表同步……');return}
- if(item.status==='queued'||item.status==='waiting'||item.status==='pending')progress(40,'排队等待 Runner');
- else if(item.status==='in_progress')progress(65,'Windows 构建中');
- else if(item.status==='completed')progress(item.conclusion==='success'?100:85,item.conclusion==='success'?'构建成功 · 源码清理已尝试执行':'构建结束 · 检查日志');
- show('任务：'+job+'\n状态：'+item.status+'\n结果：'+(item.conclusion||'执行中')+'\n更新：'+item.updated_at);
+ if(item.status==='queued'||item.status==='waiting'||item.status==='pending')progress(40,'排队等待 Windows Runner');
+ else if(item.status==='in_progress'){
+   let stepText='Windows Runner 已启动';
+   try{
+     const details=await api('/repos/'+OWNER+'/'+REPO+'/actions/runs/'+item.id+'/jobs?per_page=20');
+     const steps=(details.jobs||[]).flatMap(j=>j.steps||[]);
+     const running=steps.find(x=>x.status==='in_progress');
+     const current=running||[...steps].reverse().find(x=>x.status==='completed');
+     if(current){
+       const label=current.name||'构建中';
+       const lower=label.toLowerCase();
+       const value=lower.includes('checkout')?45:lower.includes('setup')?50:lower.includes('cache')?55:lower.includes('install')?62:lower==='build'?77:lower.includes('upload')?92:lower.includes('delete')?97:65;
+       progress(value,label);stepText='当前步骤：'+label;
+     }else progress(44,'Runner 启动中');
+   }catch(err){progress(60,'构建中（步骤暂不可用）');stepText='步骤读取暂不可用：'+err.message}
+   show('任务：'+job+'\\n状态：'+item.status+'\\n'+stepText+'\\n更新时间：'+item.updated_at);
+ } else if(item.status==='completed')progress(item.conclusion==='success'?100:100,item.conclusion==='success'?'构建成功':'构建结束：'+item.conclusion);
+ if(item.status!=='in_progress')show('任务：'+job+'\n状态：'+item.status+'\n结果：'+(item.conclusion||'执行中')+'\n更新：'+item.updated_at);
  const links=e('links');links.replaceChildren();
  const a=document.createElement('a');a.href=item.html_url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='查看 GitHub Actions 构建日志';links.append(a);
  if(item.status==='completed'){
@@ -61,3 +75,4 @@ async function refresh(){
 }
 e('build').onclick=()=>build();
 e('refresh').onclick=()=>refresh().catch(err=>show('查询失败：'+err.message));
+e('source').addEventListener('change',async()=>{const f=e('source').files[0];if(!f)return;const name=f.name.replace(/\.(py|zip)$/i,'').replace(/[^a-zA-Z0-9_.-]/g,'_');if(name)e('name').value=name.slice(0,60);if(f.name.endsWith('.py')){const text=await f.text();const found=[...text.matchAll(/^(?:from|import)\s+([A-Za-z_][\w]*)/gm)].map(x=>x[1]);const known={PySide6:'PySide6',PyQt6:'PyQt6',PIL:'Pillow',cv2:'opencv-python',requests:'requests',numpy:'numpy',pandas:'pandas',yaml:'PyYAML',bs4:'beautifulsoup4',flask:'flask',fastapi:'fastapi',tkinter:null};const deps=[...new Set(found.filter(x=>known[x]).map(x=>known[x]))];if(deps.length&&!e('packages').value.trim())e('packages').value=deps.join('\n');if(found.includes('tkinter')||found.includes('PySide6')||found.includes('PyQt6'))e('windowed').checked=true;show('智能预检测：'+(deps.join(', ')||'未发现已知第三方依赖')+'\n请检查识别结果后再提交。')}});
